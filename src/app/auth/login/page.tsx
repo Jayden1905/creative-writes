@@ -3,11 +3,16 @@
 import Facebook from '@/components/asset/Facebook'
 import Google from '@/components/asset/Google'
 import {
+  AuthCredential,
+  AuthProvider,
   createUserWithEmailAndPassword,
   FacebookAuthProvider,
+  fetchSignInMethodsForEmail,
   GoogleAuthProvider,
-  signInWithEmailAndPassword,
+  linkWithCredential,
+  OAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
   updateProfile,
 } from 'firebase/auth'
 import { useRouter } from 'next/navigation'
@@ -28,27 +33,61 @@ export default function Login() {
     password: '',
   })
 
-  const GoogleLogin = async () => {
-    const googleProvider = new GoogleAuthProvider()
-    try {
-      const result = await signInWithPopup(auth, googleProvider)
-      router.replace('/')
-    } catch (error: any) {
-      console.error(error)
+  const googleProvider = new GoogleAuthProvider()
+  const facebookProvider = new FacebookAuthProvider()
+
+  function getProvider(providerId: string) {
+    switch (providerId) {
+      case GoogleAuthProvider.PROVIDER_ID:
+        return new GoogleAuthProvider()
+      case FacebookAuthProvider.PROVIDER_ID:
+        return new FacebookAuthProvider()
+      default:
+        throw new Error(`No provider implemented for ${providerId}`)
     }
   }
 
-  const FacebookLogin = async () => {
-    const facebookProvider = new FacebookAuthProvider()
+  const supportedPopupSignInMethods = [
+    GoogleAuthProvider.PROVIDER_ID,
+    FacebookAuthProvider.PROVIDER_ID,
+  ]
+
+  async function authLogin(provider: AuthProvider) {
     try {
-      const result = await signInWithPopup(auth, facebookProvider)
-      const userCredential = FacebookAuthProvider.credentialFromResult(result)
-      const token = userCredential?.accessToken
-      const photo = result.user.photoURL + '?height=500&access_token=' + token
-      await updateProfile(auth?.currentUser!, { photoURL: photo })
+      const result = await signInWithPopup(auth, provider)
+      if (provider.providerId === 'facebook.com') {
+        const userCredential = FacebookAuthProvider.credentialFromResult(result)
+        const token = userCredential?.accessToken
+        const photo = result.user.photoURL + '?height=500&access_token=' + token
+        await updateProfile(auth?.currentUser!, { photoURL: photo })
+      }
       router.replace('/')
     } catch (error: any) {
-      console.error(error)
+      if (error.code === 'auth/account-exists-with-different-credential') {
+        const email = error.customData.email
+        const pendingCred = OAuthProvider.credentialFromError(
+          error
+        ) as AuthCredential
+
+        const providers = await fetchSignInMethodsForEmail(auth, email)
+
+        const firstPopupProviderMethod = providers.find((p: any) =>
+          supportedPopupSignInMethods.includes(p)
+        )
+
+        if (!firstPopupProviderMethod) {
+          throw new Error(
+            `Your account is linked to a provider that isn't supported.`
+          )
+        }
+
+        const linkedProvider = getProvider(firstPopupProviderMethod)
+        linkedProvider.setCustomParameters({ login_hint: email })
+
+        const result = await signInWithRedirect(auth, linkedProvider)
+        linkWithCredential(result, pendingCred)
+        router.replace('/')
+      }
     }
   }
 
@@ -61,20 +100,6 @@ export default function Login() {
       )
       const user = userCredential.user
       setFormData({ email: '', password: '' })
-    } catch (error) {
-      console.error(error)
-    }
-  }
-
-  async function loginWithEmail(email: string, password: string) {
-    try {
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        email,
-        password
-      )
-      const user = userCredential.user
-      router.push('/')
     } catch (error) {
       console.error(error)
     }
@@ -153,14 +178,14 @@ export default function Login() {
         <div className="py-4">
           <h3 className="py-4">Sign in with one of the providers</h3>
           <button
-            onClick={GoogleLogin}
+            onClick={() => authLogin(googleProvider)}
             className="flex w-full items-center gap-2 rounded-lg bg-gray-700 p-4 align-middle font-medium text-white"
           >
             <Google />
             Sign in with Google
           </button>
           <button
-            onClick={FacebookLogin}
+            onClick={() => authLogin(facebookProvider)}
             className="mt-4 flex w-full items-center gap-2 rounded-lg bg-gray-700 p-4 align-middle font-medium text-white"
           >
             <Facebook />
