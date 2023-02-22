@@ -1,7 +1,7 @@
 'use client'
 
 import Facebook from '@/components/asset/Facebook'
-import Google from '@/components/asset/google'
+import Google from '@/components/asset/Google'
 import {
   createUserWithEmailAndPassword,
   FacebookAuthProvider,
